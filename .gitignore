@@ -1,0 +1,17 @@
+# Binary
+jk
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Dependency cache
+vendor/
+
+# Config (credentials)
+~/.config/jk/
