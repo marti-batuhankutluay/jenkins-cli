@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/marti-batuhankutluay/jenkins-cli/internal/favorites"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/jenkins"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/ui/styles"
 )
@@ -243,6 +244,17 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				return OpenLogMsg{JobPath: jobPath, BuildNumber: num}
 			}
 		}
+	case "f":
+		jobPath := m.jobPath
+		jobName := m.jobName
+		envName := m.envName
+		return m, func() tea.Msg {
+			return favorites.ToggleFavoriteMsg{Fav: favorites.Favorite{
+				Name:    jobName,
+				JobPath: jobPath,
+				EnvName: envName,
+			}}
+		}
 	}
 	return m, nil
 }
@@ -468,6 +480,7 @@ func (m Model) footerView() string {
 		{"b", "build"},
 		{"d", "deploy"},
 		{"l", "log"},
+		{"f", "favorite"},
 		{"r", "refresh"},
 		{"Esc", "back"},
 		{"?", "help"},
@@ -494,8 +507,9 @@ func (m Model) helpView() string {
 			fmt.Sprintf("%s      %s", styles.HelpKeyStyle.Render("Enter"), styles.HelpDescStyle.Render("Select")),
 			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("b"), styles.HelpDescStyle.Render("Trigger build")),
 			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("d"), styles.HelpDescStyle.Render("Trigger deploy")),
-			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("l"), styles.HelpDescStyle.Render("Open selected build log")),
-			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("r"), styles.HelpDescStyle.Render("Refresh")),
+		fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("l"), styles.HelpDescStyle.Render("Open selected build log")),
+		fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("f"), styles.HelpDescStyle.Render("Toggle favorite")),
+		fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("r"), styles.HelpDescStyle.Render("Refresh")),
 			fmt.Sprintf("%s      %s", styles.HelpKeyStyle.Render("Esc"), styles.HelpDescStyle.Render("Go back")),
 			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("?"), styles.HelpDescStyle.Render("Toggle help")),
 			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("q"), styles.HelpDescStyle.Render("Quit")),

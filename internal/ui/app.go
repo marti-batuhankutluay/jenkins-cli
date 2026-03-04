@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/config"
+	"github.com/marti-batuhankutluay/jenkins-cli/internal/favorites"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/jenkins"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/ui/activebuilds"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/ui/buildlog"
@@ -33,12 +34,18 @@ type screenEntry struct {
 type App struct {
 	stack  []screenEntry
 	client *jenkins.Client
+	favs   *favorites.Favorites
 	width  int
 	height int
 }
 
 func NewApp(cfg *config.Config) *App {
 	app := &App{}
+	favs, _ := favorites.Load()
+	if favs == nil {
+		favs = &favorites.Favorites{}
+	}
+	app.favs = favs
 	if cfg != nil {
 		app.client = jenkins.NewClient(cfg.JenkinsURL, cfg.Username, cfg.APIToken)
 		app.stack = []screenEntry{{kind: screenEnvList, model: envlist.New(app.client)}}
@@ -129,10 +136,27 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case envlist.SelectedMsg:
 		return a, a.pushSized(screenJobList, joblist.New(a.client, m.Job.Name, m.Job.Name))
 
+	// EnvList: selected a favorite → jump straight to its JobList
+	case envlist.FavoriteSelectedMsg:
+		return a, a.pushSized(screenJobList,
+			joblist.NewWithEnv(a.client, m.Fav.JobPath, m.Fav.Name, m.Fav.EnvName))
+
+	// Any screen: toggle favorite → persist, notify current screen, refresh envlist
+	case favorites.ToggleFavoriteMsg:
+		added, _ := a.favs.Toggle(m.Fav)
+		result := favorites.FavToggledMsg{Added: added, Name: m.Fav.Name}
+		// Send result to current screen for inline notification
+		newModel, cmd := cur.model.Update(result)
+		cur.model = newModel
+		// Also refresh envlist favorites state
+		a.forwardToEnvList(favorites.ToggleFavoriteMsg{Fav: m.Fav})
+		return a, cmd
+
 	// JobList: folder → push another JobList; job → push JobDetail
 	case joblist.SelectedMsg:
 		if m.IsFolder {
-			return a, a.pushSized(screenJobList, joblist.New(a.client, m.JobPath, m.Job.Name))
+			envName := a.currentEnvName()
+			return a, a.pushSized(screenJobList, joblist.NewWithEnv(a.client, m.JobPath, m.Job.Name, envName))
 		}
 		return a, a.pushSized(screenJobDetail,
 			jobdetail.New(a.client, m.JobPath, m.Job.Name, a.currentEnvName()))
@@ -184,6 +208,18 @@ func (a *App) redirectToLogin() tea.Cmd {
 	sized, _ := loginModel.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
 	a.stack = []screenEntry{{kind: screenLogin, model: sized}}
 	return sized.Init()
+}
+
+// forwardToEnvList sends a message directly to the envlist model at the bottom of the stack.
+func (a *App) forwardToEnvList(msg tea.Msg) tea.Cmd {
+	for i := range a.stack {
+		if a.stack[i].kind == screenEnvList {
+			updated, cmd := a.stack[i].model.Update(msg)
+			a.stack[i].model = updated
+			return cmd
+		}
+	}
+	return nil
 }
 
 func (a *App) currentEnvName() string {

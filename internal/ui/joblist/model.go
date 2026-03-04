@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/marti-batuhankutluay/jenkins-cli/internal/favorites"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/jenkins"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/ui/activebuilds"
 	"github.com/marti-batuhankutluay/jenkins-cli/internal/ui/styles"
@@ -32,8 +33,10 @@ type Model struct {
 	client     *jenkins.Client
 	folderPath string
 	folderName string
+	envName    string
 	jobs       []jenkins.Job
 	filtered   []jenkins.Job
+	favs       *favorites.Favorites
 	cursor     int
 	filter     string
 	loading    bool
@@ -42,17 +45,30 @@ type Model struct {
 	width      int
 	height     int
 	showHelp   bool
+	notif      string
+	notifTick  int
 }
 
 func New(client *jenkins.Client, folderPath, folderName string) Model {
+	return NewWithEnv(client, folderPath, folderName, folderName)
+}
+
+func NewWithEnv(client *jenkins.Client, folderPath, folderName, envName string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = styles.SpinnerStyle
+
+	favs, _ := favorites.Load()
+	if favs == nil {
+		favs = &favorites.Favorites{}
+	}
 
 	return Model{
 		client:     client,
 		folderPath: folderPath,
 		folderName: folderName,
+		envName:    envName,
+		favs:       favs,
 		loading:    true,
 		spinner:    s,
 	}
@@ -95,6 +111,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ErrMsg:
 		m.loading = false
 		m.err = msg.Err.Error()
+		return m, nil
+
+	case favorites.FavToggledMsg:
+		if msg.Added {
+			m.notif = "★ Added to favorites: " + msg.Name
+		} else {
+			m.notif = "☆ Removed from favorites: " + msg.Name
+		}
+		m.notifTick = 4
+		if updated, err := favorites.Load(); err == nil && updated != nil {
+			m.favs = updated
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -178,6 +206,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return SelectedMsg{Job: job, JobPath: jobPath, IsFolder: isFolder}
 				}
 			}
+		case "f":
+			if len(m.filtered) > 0 {
+				job := m.filtered[m.cursor]
+				jobPath := m.folderPath + "/" + job.Name
+				jobName := job.Name
+				envName := m.envName
+				return m, func() tea.Msg {
+					return favorites.ToggleFavoriteMsg{Fav: favorites.Favorite{
+						Name:    jobName,
+						JobPath: jobPath,
+						EnvName: envName,
+					}}
+				}
+			}
 		case "/":
 			m.filter = "/"
 		}
@@ -205,6 +247,11 @@ func (m Model) FolderName() string {
 	return m.folderName
 }
 
+// EnvName returns the root environment name
+func (m Model) EnvName() string {
+	return m.envName
+}
+
 func (m Model) View() string {
 	if m.height == 0 {
 		return ""
@@ -229,6 +276,10 @@ func (m Model) View() string {
 
 	var rows []string
 
+	if m.notif != "" {
+		rows = append(rows, styles.SuccessStyle.PaddingLeft(2).Render(m.notif))
+	}
+
 	if m.filter != "" {
 		rows = append(rows,
 			styles.FilterStyle.PaddingLeft(2).Render("Filter: ")+
@@ -237,7 +288,7 @@ func (m Model) View() string {
 
 	// Column header + separator = 2 fixed rows
 	colHeader := lipgloss.NewStyle().PaddingLeft(2).Foreground(styles.ColorMuted).
-		Render(fmt.Sprintf("%-3s  %-36s  %-8s  %-20s  %s", " ", "NAME", "BUILD #", "TRIGGERED BY", "STATUS"))
+		Render(fmt.Sprintf("%-3s%-2s  %-36s  %-8s  %-20s  %s", " ", " ", "NAME", "BUILD #", "TRIGGERED BY", "STATUS"))
 	rows = append(rows, colHeader)
 	rows = append(rows, styles.MutedStyle.PaddingLeft(2).Render(strings.Repeat("─", max(0, m.width-4))))
 
@@ -258,13 +309,18 @@ func (m Model) View() string {
 			continue
 		}
 		icon := styles.StatusIcon(job.Color)
+		jobPath := m.folderPath + "/" + job.Name
+		starIcon := "  "
+		if m.favs.Has(jobPath) {
+			starIcon = lipgloss.NewStyle().Foreground(styles.ColorText).Render("★ ")
+		}
 		name := job.Name
 		if jenkins.IsFolder(job) {
 			name = "▶ " + name
 		}
 		nameDisplay := name
-		if len(name) > 40 {
-			nameDisplay = name[:37] + "..."
+		if len(name) > 38 {
+			nameDisplay = name[:35] + "..."
 		}
 
 		buildNum := styles.MutedStyle.Render("-")
@@ -300,7 +356,7 @@ func (m Model) View() string {
 			}
 		}
 
-		row := fmt.Sprintf("%s  %-36s  %-8s  %-20s  %s", icon, nameDisplay, buildNum, triggeredBy, statusStr)
+		row := fmt.Sprintf("%s%s  %-36s  %-8s  %-20s  %s", icon, starIcon, nameDisplay, buildNum, triggeredBy, statusStr)
 		if i == m.cursor {
 			rows = append(rows, styles.SelectedItemStyle.Width(max(0, m.width-2)).Render(row))
 		} else {
@@ -333,6 +389,7 @@ func (m Model) footerView() string {
 	keys := []struct{ key, desc string }{
 		{"↑↓", "navigate"},
 		{"Enter", "select"},
+		{"f", "favorite"},
 		{"/", "filter"},
 		{"w", "active builds"},
 		{"r", "refresh"},
@@ -354,8 +411,9 @@ func (m Model) helpView() string {
 			"",
 			fmt.Sprintf("%s  %s", styles.HelpKeyStyle.Render("↑/k  ↓/j"), styles.HelpDescStyle.Render("Navigate")),
 			fmt.Sprintf("%s      %s", styles.HelpKeyStyle.Render("Enter"), styles.HelpDescStyle.Render("Open job/folder")),
-			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("/"), styles.HelpDescStyle.Render("Filter services")),
-			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("r"), styles.HelpDescStyle.Render("Refresh")),
+		fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("f"), styles.HelpDescStyle.Render("Toggle favorite")),
+		fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("/"), styles.HelpDescStyle.Render("Filter services")),
+		fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("r"), styles.HelpDescStyle.Render("Refresh")),
 			fmt.Sprintf("%s      %s", styles.HelpKeyStyle.Render("Esc"), styles.HelpDescStyle.Render("Go back")),
 			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("?"), styles.HelpDescStyle.Render("Toggle help")),
 			fmt.Sprintf("%s        %s", styles.HelpKeyStyle.Render("q"), styles.HelpDescStyle.Render("Quit")),
