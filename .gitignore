@@ -15,3 +15,5 @@ vendor/
 
 # Config (credentials)
 ~/.config/jk/
+
+jenkins-cli

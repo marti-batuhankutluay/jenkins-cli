@@ -63,6 +63,7 @@ rm ~/.config/jenkins-cli/config.yaml
 | `/` | Filter list |
 | `b` | Trigger build |
 | `d` | Trigger deploy |
+| `f` | Favorite / Unfavorite |
 | `l` | Open build log |
 | `w` | Active builds |
 | `r` | Refresh |
