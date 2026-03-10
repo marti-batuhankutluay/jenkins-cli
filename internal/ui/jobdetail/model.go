@@ -217,7 +217,8 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "b":
 		m.waitingKey = "b"
 		m.deployBuildValue = ""
-		return m, m.checkRunning()
+		m.st = stateTriggering
+		return m, tea.Batch(m.spinner.Tick, m.checkRunning())
 	case "d":
 		m.waitingKey = "d"
 		m.deployBuildValue = ""
@@ -232,7 +233,8 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.deployBuildValue = fmt.Sprintf("%d", b.Number)
 			}
 		}
-		return m, m.checkRunning()
+		m.st = stateTriggering
+		return m, tea.Batch(m.spinner.Tick, m.checkRunning())
 	case "l":
 		if m.detail != nil && m.detail.LastBuild != nil {
 			num := m.detail.LastBuild.Number
@@ -336,7 +338,11 @@ func (m Model) View() string {
 	case stateLoading:
 		return header + "\n" + m.pad(fmt.Sprintf("  %s Loading job details...", m.spinner.View())) + footer
 	case stateTriggering:
-		return header + "\n" + m.pad(fmt.Sprintf("  %s Triggering build...", m.spinner.View())) + footer
+		label := "Triggering build..."
+		if m.waitingKey == "d" {
+			label = "Triggering deploy..."
+		}
+		return header + "\n" + m.pad(fmt.Sprintf("  %s %s", m.spinner.View(), label)) + footer
 	case stateErr:
 		body := styles.ErrorStyle.PaddingLeft(2).Render("✗ Error: "+m.err) + "\n" +
 			styles.MutedStyle.PaddingLeft(2).Render("Press r to retry  •  Esc to go back")
